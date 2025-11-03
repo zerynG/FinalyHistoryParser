@@ -35,6 +35,9 @@ class ParsingModes:
         consecutive_empty_scrolls = 0
         max_empty_scrolls = 5
 
+        # Список для хранения новых событий перед сохранением
+        new_events = []
+
         while processed_count < max_events_to_process and consecutive_empty_scrolls < max_empty_scrolls:
             # Парсим видимые ставки
             visible_coupons = self.parser.get_visible_coupon_numbers()
@@ -78,15 +81,16 @@ class ParsingModes:
                         f"🎯 [{processed_count}/{max_events_to_process}] НОВОЕ событие: {coupon} (результат: {bet_result})")
                     print(f"🔍 Проверка: {coupon} НЕТ в existing_coupons")
 
-                    # Парсим и сохраняем полную информацию
-                    success = self._parse_and_save_complete_bet(coupon, bet_info)
-                    if success:
+                    # Парсим полную информацию
+                    parsed_data = self._parse_complete_bet(coupon, bet_info)
+                    if parsed_data:
+                        new_events.append(parsed_data)
                         new_events_count += 1
-                        print(f"✅ [{processed_count}/{max_events_to_process}] Успешно сохранено: {coupon}")
+                        print(f"✅ [{processed_count}/{max_events_to_process}] Успешно спаршено: {coupon}")
                         # Добавляем в existing_coupons чтобы не парсить повторно
                         existing_coupons.add(coupon)
                     else:
-                        print(f"❌ [{processed_count}/{max_events_to_process}] Ошибка сохранения: {coupon}")
+                        print(f"❌ [{processed_count}/{max_events_to_process}] Ошибка парсинга: {coupon}")
 
             if batch_processed > 0:
                 consecutive_empty_scrolls = 0
@@ -101,49 +105,17 @@ class ParsingModes:
                     print("❌ Не удалось прокрутить дальше")
                     break
 
+        # Сохраняем все новые события с правильной сортировкой
+        if new_events:
+            print(f"💾 Сохраняем {len(new_events)} новых событий...")
+            self._save_new_events_sorted(new_events)
+
         print(f"\n✅ Инкрементальный парсинг завершен.")
         print(f"📊 Обработано событий: {processed_count}")
         print(f"📈 Добавлено новых событий: {new_events_count}")
 
-    def _load_existing_coupons_with_debug(self):
-        """Загружает номера купонов из существующего файла с отладочной информацией"""
-        existing_coupons = set()
-
-        if os.path.exists(self.existing_data_file):
-            try:
-                print(f"📁 Загружаем данные из файла: {self.existing_data_file}")
-                with open(self.existing_data_file, 'r', encoding='utf-8') as f:
-                    reader = csv.DictReader(f)
-                    row_count = 0
-                    for row in reader:
-                        row_count += 1
-                        if 'coupon_number' in row and row['coupon_number']:
-                            coupon = row['coupon_number'].strip()
-                            existing_coupons.add(coupon)
-                            # Выводим первые 5 купонов для отладки
-                            if row_count <= 5:
-                                print(f"   [{row_count}] coupon_number: '{coupon}'")
-
-                    print(f"📊 Всего строк в файле: {row_count}")
-                    print(f"📊 Уникальных купонов загружено: {len(existing_coupons)}")
-
-                    # Проверяем конкретные купоны
-                    test_coupons = ['18518380498', '18502960160', '18502945161']
-                    for test_coupon in test_coupons:
-                        if test_coupon in existing_coupons:
-                            print(f"✅ Купон {test_coupon} найден в базе")
-                        else:
-                            print(f"❌ Купон {test_coupon} ОТСУТСТВУЕТ в базе")
-
-            except Exception as e:
-                print(f"❌ Не удалось загрузить существующие данные: {e}")
-        else:
-            print("📁 Файл с данными не найден, будет создан новый")
-
-        return existing_coupons
-
-    def _parse_and_save_complete_bet(self, coupon_number, bet_info):
-        """Полностью парсит и сохраняет ставку"""
+    def _parse_complete_bet(self, coupon_number, bet_info):
+        """Полностью парсит ставку и возвращает данные"""
         try:
             print(f"🔍 Начинаем парсинг ставки {coupon_number}...")
             print(f"📋 Основная информация: {bet_info.get('pari_type', '')} - {bet_info.get('result', '')}")
@@ -182,22 +154,69 @@ class ParsingModes:
             self.parser.data.append(combined_info)
             self.parser.parsed_events.add(coupon_number)
 
-            # Сохраняем в CSV
-            success = self._append_single_to_csv(combined_info)
-
-            if success:
-                print(f"💾 Событие {coupon_number} успешно записано в CSV")
-            else:
-                print(f"❌ Ошибка записи {coupon_number} в CSV")
-
-            return success
+            return combined_info
 
         except Exception as e:
             print(f"❌ Критическая ошибка при парсинге {coupon_number}: {e}")
-            return False
+            return None
 
-    def _append_single_to_csv(self, bet_data):
-        """Добавляет одну запись в CSV файл"""
+    def _save_new_events_sorted(self, new_events):
+        """Сохраняет новые события с сортировкой по дате и времени (самые свежие вверху)"""
+        try:
+            # Сортируем новые события по дате и времени (самые свежие первые)
+            sorted_new_events = self._sort_events_by_datetime(new_events)
+            print(f"📊 Новые события отсортированы по дате/времени")
+
+            # Загружаем существующие данные
+            existing_data = []
+            file_exists = os.path.isfile(self.existing_data_file)
+
+            if file_exists:
+                with open(self.existing_data_file, 'r', encoding='utf-8') as csvfile:
+                    reader = csv.DictReader(csvfile)
+                    existing_data = list(reader)
+                print(f"📊 Загружено {len(existing_data)} существующих записей")
+
+            # Объединяем данные: новые отсортированные события + существующие
+            all_data = sorted_new_events + existing_data
+
+            # Сохраняем все данные
+            self._save_all_data_to_csv(all_data)
+            print(f"💾 Все данные сохранены с правильной сортировкой")
+
+        except Exception as e:
+            print(f"❌ Ошибка при сохранении новых событий: {e}")
+
+    def _sort_events_by_datetime(self, events):
+        """Сортирует события по дате и времени (самые свежие вначале)"""
+
+        def parse_datetime(event):
+            try:
+                # Пытаемся извлечь дату и время из start_time
+                if event.get('start_time'):
+                    datetime_str = event['start_time']
+                    # Формат: "DD.MM.YYYY HH:MM"
+                    return datetime.strptime(datetime_str, '%d.%m.%Y %H:%M')
+
+                # Если start_time нет, используем время ставки и текущую дату
+                if event.get('time'):
+                    time_str = event['time']
+                    current_date = datetime.now().strftime('%d.%m.%Y')
+                    datetime_str = f"{current_date} {time_str}"
+                    return datetime.strptime(datetime_str, '%d.%m.%Y %H:%M:%S')
+
+                # Если ничего нет, возвращаем минимальную дату
+                return datetime.min
+
+            except Exception as e:
+                print(f"⚠️ Ошибка парсинга даты для события {event.get('coupon_number', 'N/A')}: {e}")
+                return datetime.min
+
+        # Сортируем по убыванию (самые свежие сначала)
+        return sorted(events, key=parse_datetime, reverse=True)
+
+    def _save_all_data_to_csv(self, data):
+        """Сохраняет все данные в CSV файл"""
         fieldnames = [
             'coupon_number', 'time', 'pari_type', 'description', 'factor', 'result',
             'stake_amount', 'win_amount', 'start_time', 'event', 'pari',
@@ -205,36 +224,67 @@ class ParsingModes:
         ]
 
         try:
-            file_exists = os.path.isfile(self.existing_data_file)
-
-            with open(self.existing_data_file, 'a', newline='', encoding='utf-8') as csvfile:
+            with open(self.existing_data_file, 'w', newline='', encoding='utf-8') as csvfile:
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
 
-                if not file_exists:
-                    writer.writeheader()
-                    print("📄 Создан новый CSV файл с заголовком")
+                for row in data:
+                    new_row = {}
+                    for field in fieldnames:
+                        if field == 'express_events' and field in row and row[field]:
+                            events_list = []
+                            for event in row[field]:
+                                events_list.append(
+                                    f"{event.get('event', '')}: {event.get('pari', '')} - {event.get('result', '')}")
+                            new_row[field] = '; '.join(events_list)
+                        else:
+                            new_row[field] = row.get(field, '')
+                    writer.writerow(new_row)
 
-                new_row = {}
-                for field in fieldnames:
-                    if field == 'express_events' and field in bet_data and bet_data[field]:
-                        events_list = []
-                        for event in bet_data[field]:
-                            events_list.append(
-                                f"{event.get('event', '')}: {event.get('pari', '')} - {event.get('result', '')}")
-                        new_row[field] = '; '.join(events_list)
-                    else:
-                        new_row[field] = bet_data.get(field, '')
-
-                writer.writerow(new_row)
-
-            print(f"📝 Запись {bet_data.get('coupon_number', 'N/A')} добавлена в CSV")
+            print(f"💾 Всего записей в файле: {len(data)}")
             return True
 
         except Exception as e:
-            print(f"❌ Ошибка при записи в CSV: {e}")
+            print(f"❌ Ошибка при сохранении данных: {e}")
             return False
 
-    # Остальные методы остаются без изменений
+    def _load_existing_coupons_with_debug(self):
+        """Загружает номера купонов из существующего файла с отладочной информацией"""
+        existing_coupons = set()
+
+        if os.path.exists(self.existing_data_file):
+            try:
+                print(f"📁 Загружаем данные из файла: {self.existing_data_file}")
+                with open(self.existing_data_file, 'r', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    row_count = 0
+                    for row in reader:
+                        row_count += 1
+                        if 'coupon_number' in row and row['coupon_number']:
+                            coupon = row['coupon_number'].strip()
+                            existing_coupons.add(coupon)
+                            # Выводим первые 5 купонов для отладки
+                            if row_count <= 5:
+                                print(f"   [{row_count}] coupon_number: '{coupon}'")
+
+                    print(f"📊 Всего строк в файле: {row_count}")
+                    print(f"📊 Уникальных купонов загружено: {len(existing_coupons)}")
+
+                    # Проверяем конкретные купоны
+                    test_coupons = ['18518380498', '18502960160', '18502945161']
+                    for test_coupon in test_coupons:
+                        if test_coupon in existing_coupons:
+                            print(f"✅ Купон {test_coupon} найден в базе")
+                        else:
+                            print(f"❌ Купон {test_coupon} ОТСУТСТВУЕТ в базе")
+
+            except Exception as e:
+                print(f"❌ Не удалось загрузить существующие данные: {e}")
+        else:
+            print("📁 Файл с данными не найден, будет создан новый")
+
+        return existing_coupons
+
     def mode_date_parsing(self):
         """Режим 1: Парсинг по дате с дозаписью в файл"""
         print("\n📅 РЕЖИМ ПАРСИНГА ПО ДАТЕ")
@@ -263,6 +313,9 @@ class ParsingModes:
         consecutive_other_dates = 0
         max_consecutive_other_dates = 3
 
+        # Список для новых событий
+        new_events = []
+
         while not found_target_date and consecutive_other_dates < max_consecutive_other_dates:
             # Получаем видимые купоны
             visible_coupons = self.parser.get_visible_coupon_numbers()
@@ -282,7 +335,9 @@ class ParsingModes:
                 if bet_date == target_date:
                     # Это нужная дата - парсим
                     if coupon not in existing_coupons:
-                        if self._parse_and_save_complete_bet(coupon, bet_info):
+                        parsed_data = self._parse_complete_bet(coupon, bet_info)
+                        if parsed_data:
+                            new_events.append(parsed_data)
                             parsed_count += 1
                             print(f"✅ Найдено новое событие: {coupon}")
                         else:
@@ -314,6 +369,11 @@ class ParsingModes:
                     print("❌ Не удалось прокрутить дальше")
                     break
 
+        # Сохраняем новые события с сортировкой
+        if new_events:
+            print(f"💾 Сохраняем {len(new_events)} новых событий...")
+            self._save_new_events_sorted(new_events)
+
         print(f"\n✅ Парсинг по дате завершен. Найдено новых событий: {parsed_count}")
 
     def mode_full_rewrite_parsing(self):
@@ -338,8 +398,12 @@ class ParsingModes:
         # Выполняем стандартный парсинг
         self.parser.parse_bets()
 
+        # Сортируем данные перед сохранением
+        sorted_data = self._sort_events_by_datetime(self.parser.data)
+        print(f"📊 Данные отсортированы по дате/времени")
+
         # Сохраняем в временный файл
-        self._save_data_to_file(temp_file, self.parser.data)
+        self._save_all_data_to_csv(sorted_data)
 
         # Заменяем старый файл новым
         if os.path.exists(self.existing_data_file):
@@ -369,39 +433,6 @@ class ParsingModes:
             print(f"❌ Ошибка при извлечении даты: {e}")
 
         return None
-
-    def _save_data_to_file(self, filename, data):
-        """Сохраняет все данные в указанный файл"""
-        fieldnames = [
-            'coupon_number', 'time', 'pari_type', 'description', 'factor', 'result',
-            'stake_amount', 'win_amount', 'start_time', 'event', 'pari',
-            'detail_factor', 'score', 'detail_result', 'expanded', 'express_events'
-        ]
-
-        try:
-            with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                writer.writeheader()
-
-                for row in data:
-                    new_row = {}
-                    for field in fieldnames:
-                        if field == 'express_events' and field in row and row[field]:
-                            events_list = []
-                            for event in row[field]:
-                                events_list.append(
-                                    f"{event.get('event', '')}: {event.get('pari', '')} - {event.get('result', '')}")
-                            new_row[field] = '; '.join(events_list)
-                        else:
-                            new_row[field] = row.get(field, '')
-                    writer.writerow(new_row)
-
-            print(f"💾 Данные сохранены в файл: {filename}")
-            return True
-
-        except Exception as e:
-            print(f"❌ Ошибка при сохранении в файл {filename}: {e}")
-            return False
 
 
 def select_parsing_mode(driver, parser):

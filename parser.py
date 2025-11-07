@@ -182,6 +182,10 @@ class FonBetParser:
                     var resultElem = div.querySelector('.cellResult--RBrFe');
                     var sumElem = div.querySelector('.cellSum--xyTuh');
 
+                    // Проверяем наличие фрибета
+                    var freebetElem = div.querySelector('.cellDescription--qMVcZ .desc--FgM5R');
+                    var hasFreebet = freebetElem && freebetElem.textContent.trim() === 'Фрибет';
+
                     // Извлекаем сумму ставки и выигрыш
                     var stakeAmount = '';
                     var winAmount = '';
@@ -205,15 +209,22 @@ class FonBetParser:
                         }}
                     }}
 
+                    // Формируем описание с учетом фрибета
+                    var description = descElem ? descElem.textContent.trim() : '';
+                    if (hasFreebet) {{
+                        description = description + ' (Фрибет)';
+                    }}
+
                     return {{
                         time: timeElem ? timeElem.textContent.trim() : '',
                         pari_type: typeElem ? typeElem.textContent.trim() : '',
-                        description: descElem ? descElem.textContent.trim() : '',
+                        description: description,
                         factor: factorElem ? factorElem.textContent.trim() : '',
                         result: resultElem ? resultElem.textContent.trim() : '',
                         stake_amount: stakeAmount,
                         win_amount: winAmount,
-                        coupon_number: coupon
+                        coupon_number: coupon,
+                        has_freebet: hasFreebet
                     }};
                 }}
             }}
@@ -418,7 +429,7 @@ class FonBetParser:
         fieldnames = [
             'coupon_number', 'time', 'pari_type', 'description', 'factor', 'result',
             'stake_amount', 'win_amount', 'start_time', 'event', 'pari',
-            'detail_factor', 'score', 'detail_result', 'expanded', 'express_events'
+            'detail_factor', 'score', 'detail_result', 'expanded', 'express_events', 'has_freebet'
         ]
 
         file_exists = os.path.isfile(filename)
@@ -475,6 +486,11 @@ class FonBetParser:
             print(f"🕒 Время ставки: {bet.get('time', 'N/A')}")
             print(f"📝 Тип пари: {bet.get('pari_type', 'N/A')}")
             print(f"📄 Описание: {bet.get('description', 'N/A')}")
+
+            # Показываем информацию о фрибете
+            if bet.get('has_freebet'):
+                print(f"🎁 Фрибет: Да")
+
             print(f"📈 Коэффициент: {bet.get('factor', 'N/A')}")
             print(f"🎯 Результат: {bet.get('result', 'N/A')}")
             print(f"💰 Сумма ставки: {bet.get('stake_amount', 'N/A')}")
@@ -494,3 +510,7 @@ class FonBetParser:
                     for j, event in enumerate(bet['express_events'], 1):
                         print(
                             f"   {j}. {event.get('event', 'N/A')}: {event.get('pari', 'N/A')} - {event.get('result', 'N/A')}")
+
+            print("-" * 50)
+
+        print(f"\n📊 Итого спарсено ставок: {len(self.data)}")

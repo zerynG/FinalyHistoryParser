@@ -52,19 +52,37 @@ def load_data():
         # Рассчитываем чистую прибыль/убыль для каждого события
         def calculate_net_profit(row):
             result = str(row['result']).strip()
+            description = str(row['description']).strip()
+
+            # Проверяем, является ли ставка фрибетом
+            is_freebet = 'Фрибет' in description
 
             if result == 'Выигрыш':
-                return row['win_amount'] - row['stake_amount']
+                if is_freebet:
+                    # Для фрибетов учитываем только положительный выигрыш
+                    return max(0, row['win_amount'])
+                else:
+                    return row['win_amount'] - row['stake_amount']
             elif result == 'Проигрыш':
-                return -row['stake_amount']  # Для проигрыша возвращаем отрицательную сумму ставки
+                if is_freebet:
+                    # Для проигрышных фрибетов не учитываем убыток
+                    return 0
+                else:
+                    return -row['stake_amount']
             elif result == 'Продано':
-                return row['win_amount'] - row['stake_amount']
+                if is_freebet:
+                    return max(0, row['win_amount'])
+                else:
+                    return row['win_amount'] - row['stake_amount']
             elif result == 'Возврат':
                 return 0
             else:
                 return 0
 
         df['net_profit'] = df.apply(calculate_net_profit, axis=1)
+
+        # Добавляем колонку для идентификации фрибетов
+        df['is_freebet'] = df['description'].str.contains('Фрибет', na=False)
 
         return df
 
@@ -118,6 +136,17 @@ if df is not None:
     if selected_results:
         df_filtered = df_filtered[df_filtered['result'].isin(selected_results)]
 
+    # Фильтр по типу ставки (фрибет/обычная)
+    bet_type = st.sidebar.selectbox(
+        "Тип ставки",
+        options=["Все", "Обычные", "Фрибеты"]
+    )
+
+    if bet_type == "Обычные":
+        df_filtered = df_filtered[~df_filtered['is_freebet']]
+    elif bet_type == "Фрибеты":
+        df_filtered = df_filtered[df_filtered['is_freebet']]
+
     # Основная информация
     st.header("📈 Общая статистика")
 
@@ -167,6 +196,15 @@ if df is not None:
             value=f"{win_rate:.1f}%",
             delta=None
         )
+
+    # Статистика по фрибетам
+    freebet_stats = df[df['is_freebet']]
+    if len(freebet_stats) > 0:
+        st.sidebar.markdown("---")
+        st.sidebar.header("🎁 Статистика фрибетов")
+        st.sidebar.metric("Всего фрибетов", len(freebet_stats))
+        st.sidebar.metric("Выигрышных фрибетов", len(freebet_stats[freebet_stats['result'] == 'Выигрыш']))
+        st.sidebar.metric("Прибыль с фрибетов", f"{freebet_stats['net_profit'].sum():,.0f} ₽")
 
     st.markdown("---")
 
@@ -398,7 +436,6 @@ if df is not None:
         df_sorted = df_filtered.sort_values('start_time', ascending=False)
         st.dataframe(df_sorted, use_container_width=True)
 
-        # Кнопка для скачивания отфильтрованных данных
 else:
     st.error("Не удалось загрузить данные. Убедитесь, что файл 'fon_bet_data2.csv' находится в правильной директории.")
 
@@ -407,9 +444,17 @@ st.sidebar.markdown("---")
 st.sidebar.header("📝 Методика расчетов")
 st.sidebar.markdown("""
 **Чистая прибыль рассчитывается как:**
+
+**Обычные ставки:**
 - ✅ Выигрыш: `win_amount - stake_amount`
 - ❌ Проигрыш: `-stake_amount`
 - 📊 Продано: `win_amount - stake_amount`
+- 🔄 Возврат: `0`
+
+**Фрибеты (ставки с 'Фрибет' в описании):**
+- ✅ Выигрыш: `max(0, win_amount)` (только положительный выигрыш)
+- ❌ Проигрыш: `0` (не учитываем убыток)
+- 📊 Продано: `max(0, win_amount)` (только положительный выигрыш)
 - 🔄 Возврат: `0`
 
 **Винрейт:** процент выигрышных ставок от общего количества
